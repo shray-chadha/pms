@@ -3,12 +3,15 @@ package pms;
 import java.sql.*;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.Period;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Scanner;
 import java.util.Date;
+import java.util.GregorianCalendar;
 
 public class Pms {
 	
@@ -19,9 +22,8 @@ public class Pms {
 	String dbPassword = "pms";
 	ArrayList<HashMap<String, String>> listOfFunds = new ArrayList<HashMap<String, String>>();
 	
-	
-	
-	//Method to display all the available funds in the database
+
+	//Display all the available funds in the database
 	public void displayAvailableFundsData() {
 		
 		Statement getFundsStatement = null;
@@ -34,8 +36,7 @@ public class Pms {
 		String getFundsQuery = "SELECT DISTINCT (SCHEME_NAME), SCHEME_CODE FROM MASTER";
 		String initialDateQuery = "SELECT MIN(DATE_OF_NAV) FROM MASTER WHERE SCHEME_CODE=?"; 
 		String lastDateQuery = "SELECT MAX(DATE_OF_NAV) FROM MASTER WHERE SCHEME_CODE=?";
-		
-		
+				
 		//Making a connection with DB
 		try {
 			
@@ -74,11 +75,11 @@ public class Pms {
 						lastDate.next();
 						fund.put("dataTo", lastDate.getString(1));
 					
-				}
-				
+				}				
 			} catch (InstantiationException | IllegalAccessException | ClassNotFoundException | SQLException e) {
 				e.printStackTrace();
 			}
+			
 			//Closing all the statements, results sets and the database connection eventually
 			finally {
 				try { getFundsStatement.close(); } catch (Exception e) { e.printStackTrace(); }
@@ -92,7 +93,7 @@ public class Pms {
 		
 		
 		//Displaying the data of the funds available
-		System.out.println("Getting the data of the available funds ");
+		System.out.println("Getting the data of the available funds......\n ");
 		System.out.println("**********************************************************************************************************");
 		System.out.printf("%1$-20s %2$-50s %3$-20s %4$-20s", "Scheme Code", "Scheme Name", "Data From", "Data Upto");
 		System.out.println();
@@ -107,25 +108,28 @@ public class Pms {
 				Date toDate = format1.parse(formattedToDate[0]);
 				System.out.printf("%1$-20s %2$-50s %3$-20s %4$-20s",maps.get("schemeCode"),maps.get("schemeName"),format2.format(fromDate),format2.format(toDate));
 				System.out.println();
-			}catch (ParseException e) {
-				// TODO: handle exception
+			} catch (ParseException e) {
+				e.printStackTrace();
 			}	
 		}
 		System.out.println("**********************************************************************************************************");
 	}
 	
-	//	Method to set a specific day in the date 
-	public void setDay(Date date, int day) {
-		   if (date == null)
-		     return;
-		   Calendar cal = Calendar.getInstance();
-		   cal.setTime(date);
-		   cal.set(Calendar.DAY_OF_MONTH, day);
-		 }
+	
+	//Method to extract the year, month and day of month in Integer from the date object provided
+	public int[] getIntFromDate(Date myDate) {
+		Calendar cal = new GregorianCalendar();
+		int[] res = new int[3];
+		cal.setTime(myDate);
+		res[0] = cal.get(Calendar.YEAR);
+		res[1] = cal.get(Calendar.MONTH)+1;
+		res[2] = cal.get(Calendar.DAY_OF_MONTH);
+		return res;
+	}
 	
 	
-	// Method to calculate the CAGR of the portfolio
-	public void calculateCAGR(ArrayList<HashMap<String, String>> userFunds, Date startDate, Date endDate) {
+	// Method to calculate the CAGR of the fund and the whole portfolio
+	public void portfolio(ArrayList<HashMap<String, String>> userFunds, Date startDate, Date endDate) {
 		
 		PreparedStatement getInitialNAV = null;
 		ResultSet initialNAVResultSet = null;
@@ -133,12 +137,18 @@ public class Pms {
 		ResultSet finalNAVResultSet = null;
 		String getNAVQuery = "SELECT NAV FROM MASTER WHERE SCHEME_CODE=? AND DATE_OF_NAV BETWEEN ? AND ?";
 		SimpleDateFormat dateformat = new SimpleDateFormat("dd-MM-yyyy");
-
+		SimpleDateFormat periodOfConsiderationDateFormat = new SimpleDateFormat("MMMM yyyy");
+		Double portfolioIV = 0.0;
+		Double portfolioFV = 0.0;
 		
-		for (HashMap<String, String> userMap : userFunds) {
+		//Get the number of months between the start and the end date provided by the user
+		LocalDate sDate = LocalDate.of(getIntFromDate(startDate)[0], getIntFromDate(startDate)[1], getIntFromDate(startDate)[2]);
+		LocalDate eDate = LocalDate.of(getIntFromDate(endDate)[0], getIntFromDate(endDate)[1], getIntFromDate(endDate)[2]);
+		Period period = Period.between(sDate, eDate);
+		int noOfMonths = period.getMonths()+(period.getYears())*12;
 			
-			try {
-				
+		for (HashMap<String, String> userMap : userFunds) {			
+			try {				
 				Class.forName(driver).newInstance();
 				dbConn = DriverManager.getConnection(dbUrl, dbUsername, dbPassword);
 				
@@ -165,18 +175,70 @@ public class Pms {
 				userMap.put("FV", finalNAVResultSet.getString(1));
 				
 				//Calculate the CAGR of the fund
-				Double doubleIV = Double.parseDouble(userMap.get("IV"));
-				Double doubleFV = Double.parseDouble(userMap.get("FV"));
-				Double fundCAGR = ((doubleFV-doubleIV)/doubleIV)*100;
-				System.out.println(fundCAGR);
+				Double CAGR = calculateCAGR(noOfMonths, Double.parseDouble(userMap.get("IV")), Double.parseDouble(userMap.get("FV")));
+				userMap.put("CAGR", CAGR.toString());
 				
-			
-		}catch (InstantiationException | IllegalAccessException | ClassNotFoundException | SQLException e) {
+			} catch (InstantiationException | IllegalAccessException | ClassNotFoundException | SQLException e) {
 			e.printStackTrace();
+			}
+			//Closing all the statements, results sets and the database connection eventually
+			finally {
+				try { getInitialNAV.close(); } catch (Exception e) { e.printStackTrace(); }
+			    try { initialNAVResultSet.close(); } catch (Exception e) { e.printStackTrace(); }
+			    try { getFinalNAV.close(); } catch (Exception e) { e.printStackTrace(); }
+			    try { finalNAVResultSet.close(); } catch (Exception e) { e.printStackTrace(); }
+			    try { dbConn.close(); } catch (Exception e) {e.printStackTrace();}
+			}
 		}
-		}	
-
 		
+		//Calculate the CAGR of the portfolio
+		for(HashMap<String, String> userMap : userFunds) {
+			portfolioIV = portfolioIV + Double.parseDouble(userMap.get("IV"));
+			portfolioFV = portfolioFV + Double.parseDouble(userMap.get("FV"));	
+		}
+		Double portfolioCAGR = calculateCAGR(noOfMonths, portfolioIV, portfolioFV);
+		
+		//Displaying the details of the portfolio
+		System.out.println();
+		System.out.println("Creating the portfolio......\n");
+		System.out.println("**********************************************************************************************************");
+		System.out.printf("%1$-20s %2$-50s %3$-30s %4$-20s", "Scheme Code", "Scheme Name", "Period of Consideration", "CAGR (%)");
+		System.out.println();
+		String periodOfConsideration = periodOfConsiderationDateFormat.format(startDate)+" - "+periodOfConsiderationDateFormat.format(endDate); 
+		
+		for(HashMap<String, String> userMap : userFunds) {
+			String CAGRasString = String.format ("%,.2f", Double.parseDouble(userMap.get("CAGR")));
+			String displaySchemeName = "";
+			for(HashMap<String, String> funds : listOfFunds) {
+				if(funds.get("schemeCode").equals(userMap.get("schemeCode"))) {
+					displaySchemeName = funds.get("schemeName");
+					break;
+				}
+			}
+			System.out.printf("%1$-20s %2$-50s %3$-30s %4$-20s", userMap.get("schemeCode"), displaySchemeName, periodOfConsideration, CAGRasString+" %");
+			System.out.println();
+		}		
+		System.out.println("\nNet CAGR of the whole portfolio = "+String.format("%,.2f", portfolioCAGR)+" % over the period: "+periodOfConsideration);
+		System.out.println("**********************************************************************************************************\n");
+	}
+	
+	
+	//Method to calculate the CAGR of a fund or portfolio
+	public double calculateCAGR(int months, double initialNAV, double finalNAV) {
+		
+		if(months<=11) {
+			Double fundCAGR = ((finalNAV-initialNAV)/initialNAV)*100;
+			return fundCAGR;				
+		}			
+		if(months>=12) {
+			Double doubleMonths = (double) months;
+			Double t = doubleMonths/12.0;
+			Double tRoot = 1.0/t;
+			Double temp = Math.pow((finalNAV/initialNAV), tRoot);
+			Double fundCAGR = (temp-1)*100;
+			return fundCAGR;
+		}			
+		return 0.0;			
 	}
 		
 	
@@ -253,11 +315,7 @@ public class Pms {
 					}
 				}
 				
-				pms.calculateCAGR(fundsDataFromUser, startDateFromUser, endDateFromUser);
-				
-
-				
-
+				pms.portfolio(fundsDataFromUser, startDateFromUser, endDateFromUser);
 				
 				} catch (ParseException e) {
 					e.printStackTrace();
@@ -277,5 +335,4 @@ public class Pms {
 		in.close();	
 		System.out.println("Good Bye. Happy Investing..!!");
 	}
-
 }
